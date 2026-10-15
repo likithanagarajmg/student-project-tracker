@@ -1,3 +1,4 @@
+
 const form = document.querySelector('#project-form');
 const nameInput = document.querySelector('#name');
 const statusInput = document.querySelector('#status');
@@ -7,10 +8,8 @@ const saveButton = document.querySelector('#save-button');
 const cancelButton = document.querySelector('#cancel-button');
 const message = document.querySelector('#message');
 
-const storageKey = 'workshop-projects-v1';
 let projects = [];
 let editingId = null;
-let storageReady = true;
 
 function showMessage(text) {
     if (message) {
@@ -18,65 +17,18 @@ function showMessage(text) {
     }
 }
 
-function loadProjects() {
+async function loadProjects() {
     try {
-        const savedData = localStorage.getItem(storageKey);
+        const response = await fetch('/api/projects');
 
-        if (savedData === null) {
-            projects = [];
-            return;
+        if (!response.ok) {
+            throw new Error('Could not load projects.');
         }
 
-        const savedProjects = JSON.parse(savedData);
-
-        if (!Array.isArray(savedProjects)) {
-            throw new Error('Invalid saved data');
-        }
-
-        const ids = new Set();
-
-        for (const project of savedProjects) {
-            if (
-                !project ||
-                typeof project !== 'object' ||
-                !['string', 'number'].includes(typeof project.id) ||
-                (typeof project.id === 'string' && project.id.trim() === '') ||
-                (typeof project.id === 'number' && !Number.isFinite(project.id)) ||
-                typeof project.name !== 'string' ||
-                project.name.trim() === '' ||
-                !['Planned', 'In Progress', 'Completed'].includes(project.status)
-            ) {
-                throw new Error('Invalid project');
-            }
-
-            const idKey = typeof project.id + ':' + project.id;
-
-            if (ids.has(idKey)) {
-                throw new Error('Duplicate project ID');
-            }
-
-            ids.add(idKey);
-        }
-
-        projects = savedProjects;
+        projects = await response.json();
+        renderProjects();
     } catch (error) {
-        storageReady = false;
-        showMessage('Saved data could not be loaded safely. Existing data has not been overwritten.');
-    }
-}
-
-function saveProjects() {
-    if (!storageReady) {
-        showMessage('Changes could not be saved because saved data could not be loaded safely.');
-        return false;
-    }
-
-    try {
-        localStorage.setItem(storageKey, JSON.stringify(projects));
-        return true;
-    } catch (error) {
-        showMessage('Changes could not be saved to browser storage.');
-        return false;
+        showMessage('Could not load projects from the server. Please check that the server is running.');
     }
 }
 
@@ -114,32 +66,30 @@ function renderProjects() {
         deleteButton.type = 'button';
         deleteButton.textContent = 'Delete';
 
-        deleteButton.addEventListener('click', function() {
+        deleteButton.addEventListener('click', async function() {
             if (!confirm('Are you sure you want to delete "' + project.name + '"?')) {
                 return;
             }
 
-            const index = projects.findIndex(function(item) {
-                return item.id === project.id;
-            });
+            try {
+                const response = await fetch('/api/projects/' + project.id, {
+                    method: 'DELETE'
+                });
 
-            if (index === -1) {
-                return;
-            }
+                const result = await response.json();
 
-            const deletedProject = projects[index];
-            projects.splice(index, 1);
+                if (!response.ok) {
+                    throw new Error(result.error || 'Could not delete project.');
+                }
 
-            if (editingId === deletedProject.id) {
-                resetForm();
-            }
+                if (editingId === project.id) {
+                    resetForm();
+                }
 
-            if (saveProjects()) {
-                renderProjects();
-                showMessage('Project deleted and saved.');
-            } else {
-                projects.splice(index, 0, deletedProject);
-                renderProjects();
+                await loadProjects();
+                showMessage('Project deleted successfully.');
+            } catch (error) {
+                showMessage(error.message || 'Could not delete project.');
             }
         });
 
@@ -152,7 +102,7 @@ function renderProjects() {
     }
 }
 
-form.addEventListener('submit', function(event) {
+form.addEventListener('submit', async function(event) {
     event.preventDefault();
 
     const name = nameInput.value.trim();
@@ -169,52 +119,42 @@ form.addEventListener('submit', function(event) {
         return;
     }
 
-    if (editingId !== null) {
-        const project = projects.find(function(item) {
-            return item.id === editingId;
+    const projectData = {
+        name: name,
+        status: status
+    };
+
+    try {
+        const isEditing = editingId !== null;
+        const url = isEditing
+            ? '/api/projects/' + editingId
+            : '/api/projects';
+
+        const response = await fetch(url, {
+            method: isEditing ? 'PUT' : 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(projectData)
         });
 
-        if (!project) {
-            resetForm();
-            showMessage('Project not found. Please try again.');
-            return;
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.error || 'Could not save project.');
         }
 
-        const oldName = project.name;
-        const oldStatus = project.status;
+        await loadProjects();
+        resetForm();
 
-        project.name = name;
-        project.status = status;
+        showMessage(isEditing
+            ? 'Project updated successfully.'
+            : 'Project added successfully.');
 
-        if (saveProjects()) {
-            renderProjects();
-            showMessage('Project updated and saved.');
-            resetForm();
-        } else {
-            project.name = oldName;
-            project.status = oldStatus;
-            renderProjects();
-        }
-    } else {
-        const project = {
-            id: Date.now() + Math.random(),
-            name: name,
-            status: status
-        };
-
-        projects.push(project);
-
-        if (saveProjects()) {
-            renderProjects();
-            showMessage('Project added and saved.');
-            resetForm();
-        } else {
-            projects.pop();
-            renderProjects();
-        }
+        nameInput.focus();
+    } catch (error) {
+        showMessage(error.message || 'Could not save project. Please check the server.');
     }
-
-    nameInput.focus();
 });
 
 cancelButton.addEventListener('click', function() {
@@ -224,4 +164,4 @@ cancelButton.addEventListener('click', function() {
 });
 
 loadProjects();
-renderProjects();
+s
